@@ -17,11 +17,17 @@
 #define ACCEL_POINTS 7
 
 /* Check if our upcoming mouse movement would result in having to switch outputs */
-enum screen_pos_e is_screen_switch_needed(int position, int offset) {
-    if (position + offset < MIN_SCREEN_COORD - global_state.config.jump_threshold)
+enum screen_pos_e is_screen_switch_needed(device_t *state, int position, int offset) {
+    output_t *output = &state->config.output[state->active_output];
+
+    /* Apply jump threshold only when crossing physical PC boundaries (screen_index == 1 and 
+       moving towards the other PC). Switching virtual desktops on the same PC has a 0 threshold. */
+    int left_threshold = (output->pos != LEFT && output->screen_index == 1) ? state->config.jump_threshold : 0;
+    if (position + offset < MIN_SCREEN_COORD - left_threshold)
         return LEFT;
 
-    if (position + offset > MAX_SCREEN_COORD + global_state.config.jump_threshold)
+    int right_threshold = (output->pos != RIGHT && output->screen_index == 1) ? state->config.jump_threshold : 0;
+    if (position + offset > MAX_SCREEN_COORD + right_threshold)
         return RIGHT;
 
     return NONE;
@@ -109,7 +115,7 @@ enum screen_pos_e update_mouse_position(device_t *state, mouse_values_t *values)
     int offset_y = round(values->move_y * acceleration_factor * (current->speed_y >> reduce_speed));
 
     /* Determine if our upcoming movement would stay within the screen */
-    enum screen_pos_e switch_direction = is_screen_switch_needed(state->pointer_x, offset_x);
+    enum screen_pos_e switch_direction = is_screen_switch_needed(state, state->pointer_x, offset_x);
 
     /* Update movement */
     state->pointer_x = move_and_keep_on_screen(state->pointer_x, offset_x);
@@ -197,7 +203,10 @@ void switch_virtual_desktop_macos(device_t *state, int direction) {
     mouse_report_t move_relative_one = {
         .x = move,
         .mode = RELATIVE,
-        .buttons = state->mouse_buttons,
+        /* Force buttons to 0 for relative movement to avoid duplicating the button 
+           press state, which would leave the relative HID mouse permanently stuck 
+           down if the user is dragging an item while switching desktops. */
+        .buttons = 0,
     };
 
     output_mouse_report(&edge_position, state);
